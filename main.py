@@ -17,6 +17,24 @@ def display_discography(discography):
         print('Album:', key, 'Tracks:', value)
 
 
+def convert_to_flat(note):
+    sharp_to_flat = {
+        'C#': 'Db',
+        'D#': 'Eb',
+        'F#': 'Gb',
+        'G#': 'Ab',
+        'A#': 'Bb'
+    }
+
+    note = sharp_to_flat[note]
+
+    return note
+
+
+
+def get_roman_numeral_notation(chords, key):
+    note_list = ['A']
+
 # Define a function to retrieve all tracks by an artist
 def get_artist_tracks(artist_id):
     discography = {}
@@ -101,6 +119,84 @@ def get_song_chord_urls(artist_dictionary):
         driver.quit()
 
 
+def convert_to_flat(note):
+    # Create dictionary for each sharp's corresponding flat
+    sharp_to_flat = {
+        'C#': 'Db',
+        'D#': 'Eb',
+        'F#': 'Gb',
+        'G#': 'Ab',
+        'A#': 'Bb'
+    }
+    for key, value in sharp_to_flat.items():
+        if key in note:
+            # Return replacement
+            note = note.replace(key, sharp_to_flat[key])
+
+    return note
+
+
+def get_scale(key):
+    root = key
+    musical_notes = ['A', 'Bb', 'B', 'C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab']
+    scale_construction_rules = {'major': [2, 2, 1, 2, 2, 2], 'minor': [2, 1, 2, 2, 1, 2]}
+    scale = []
+    roman_numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII']
+    roman_numeral_dictionary = {}
+    if 'm' in root:
+        scale_type = 'minor'
+        root = root.replace('m', '')
+    else:
+        scale_type = 'major'
+
+    if '#' in root:
+        root = convert_to_flat(root)
+
+    scale.append(root)
+    roman_numeral_dictionary[root] = roman_numerals[0]
+    position = musical_notes.index(root)
+
+    counter = 1
+    # Construct the scale based on scale type and rules
+    for step in scale_construction_rules[scale_type]:
+        position = (position + step) % len(musical_notes)
+        scale.append(musical_notes[position])
+        roman_numeral_dictionary[musical_notes[position]] = roman_numerals[counter]
+        counter += 1
+
+    return scale, roman_numeral_dictionary
+
+
+def get_roman_numeral_notation(chords, key):
+    scale, roman_numeral_dictionary = get_scale(key)
+    roman_numeral_scale = []
+    # Create a regex from the dictionary keys
+    regex = re.compile("|".join(map(re.escape, roman_numeral_dictionary.keys())))
+    for chord in chords:
+        if '#' in chord or 'b' in chord:
+            chord = convert_to_flat(chord)
+            sharp_flat = 2
+        else:
+            sharp_flat = 1
+
+        # For each match, look up the corresponding value in the dictionary
+        reformatted_chord = regex.sub(lambda match: roman_numeral_dictionary[match.group(0)], chord[:sharp_flat])
+        second_half = chord[sharp_flat:]
+        reformatted_chord += second_half
+        if 'm' in chord:
+            print(chord)
+            print(reformatted_chord)
+            print()
+        #print(reformatted_chord)
+        if 'm' in reformatted_chord:
+            reformatted_chord = reformatted_chord.replace('m', '')
+            reformatted_chord = reformatted_chord.lower()
+        if 'MAJ' in reformatted_chord:
+            reformatted_chord = reformatted_chord.replace('MAJ', '')
+        roman_numeral_scale.append(reformatted_chord)
+    return scale, roman_numeral_scale
+
+
 # Define function to obtain chords from html
 def get_song_chords(artist_dictionary):
     # Initialize the WebDriver for Firefox (assuming geckodriver is in PATH)
@@ -136,8 +232,13 @@ def get_song_chords(artist_dictionary):
                             print('Found span with class="chord-label cbg1qdk" within div with class="aqpm70f":')
                             curr_chords.append(span.text)
                         reformatted_chords = reformat_chords(curr_chords)
+                        key = reformatted_chords[-1]
+                        chords = reformatted_chords[:-1]
                         song_details['key'] = reformatted_chords[-1]
                         song_details['chords'] = reformatted_chords[:-1]
+                        scale, roman_numeral_scale = get_roman_numeral_notation(chords, key)
+                        song_details['roman'] = roman_numeral_scale
+                        song_details['scale'] = scale
                         artist_dictionary[artist][album][song] = song_details
                     else:
                         print('Div with class="aqpm70f" not found.')
@@ -166,8 +267,8 @@ def reformat_chords(chords):
 
 
 # Example: Get all tracks by an artist (replace 'ARTIST_ID' with the artist's ID)
-artist_id = '7n2Ycct7Beij7Dj7meI4X0'
-artist_name = 'Twice'
+artist_id = '4vGrte8FDu062Ntj0RsPiZ'
+artist_name = 'polyphia'
 artist_dictionary = {}
 discography = get_artist_tracks(artist_id)
 artist_dictionary[artist_name] = discography
