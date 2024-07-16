@@ -8,6 +8,12 @@ import json
 import pandas as pd
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import apriori, association_rules
+import sqlite3
+import ast
+import sys
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QWidget, QDesktopWidget
+from PyQt5.QtWidgets import QApplication, QWidget, QHBoxLayout, QLineEdit, QLabel, QVBoxLayout
 
 # Initialize the Spotify client
 client_credentials_manager = SpotifyClientCredentials(client_id='98c92df339b44755b057c9e2be8a9d24', client_secret='295fb3083f4d4e348acf8afded757d9a')
@@ -20,30 +26,12 @@ def display_discography(discography):
         print('Album:', key, 'Tracks:', value)
 
 
-def convert_to_flat(note):
-    sharp_to_flat = {
-        'C#': 'Db',
-        'D#': 'Eb',
-        'F#': 'Gb',
-        'G#': 'Ab',
-        'A#': 'Bb'
-    }
-
-    note = sharp_to_flat[note]
-
-    return note
-
-
-
-def get_roman_numeral_notation(chords, key):
-    note_list = ['A']
-
 # Define a function to retrieve all tracks by an artist
 def get_artist_tracks(artist_id):
     discography = {}
     # Get the artist's albums
     albums = sp.artist_albums(artist_id, album_type=['album'], limit=50)  # Adjust limit as needed
-    singles = sp.artist_albums(artist_id, album_type=['single'], limit=50)  # Adjust limit as needed
+    # singles = sp.artist_albums(artist_id, album_type=['single'], limit=50)
 
     # Iterate through each album
     for album in albums['items']:
@@ -55,7 +43,6 @@ def get_artist_tracks(artist_id):
 
             for track in tracks['items']:
                 discography[album['name']][track['name']] = None
-
 
     # for single in singles['items']:
     #     if single['name'] not in discography:
@@ -71,20 +58,20 @@ def get_artist_tracks(artist_id):
 
 
 # Define a function to retrieve search URL of songs
-def get_song_search_urls(artist_dictionary):
+def construct_song_search_urls(artist_dictionary):
     url_list = []
     for artist, discography in artist_dictionary.items():
         for album, tracks in discography.items():
             for song, link in tracks.items():
                 link = re.sub(r'\s', '%20', song)
-                curr_url = 'https://chordify.net/search/' + artist +'%20' + link
+                curr_url = 'https://chordify.net/search/' + artist + '%20' + link
                 artist_dictionary[artist][album][song] = curr_url
                 url_list.append(curr_url)
     return artist_dictionary
 
 
 # Define a function to obtain chord URL from html
-def get_song_chord_urls(artist_dictionary):
+def scrape_song_chord_urls(artist_dictionary):
     # Initialize the WebDriver for Firefox (assuming geckodriver is in PATH)
     driver = webdriver.Firefox()
 
@@ -216,17 +203,17 @@ def get_roman_numeral_notation(chords, key):
 
 
 # Define function to obtain chords from html
-def get_song_chords(artist_dictionary):
+def scrape_song_chords(artist_dictionary):
     # Initialize the WebDriver for Firefox (assuming geckodriver is in PATH)
     driver = webdriver.Firefox()
-    pd_data = []
+    progressions = []
     key_dictionary = {}
     first_chord_dictionary = {}
     try:
         for artist, discography in artist_dictionary.items():
             for album, tracks in discography.items():
                 for song, url in tracks.items():
-                    song_details = {'chords': None, 'key': None}
+                    song_details = {}
 
                     # Navigate to a webpage
                     driver.get('https://chordify.net' + url)
@@ -252,29 +239,27 @@ def get_song_chords(artist_dictionary):
                             print('Found span with class="chord-label cbg1qdk" within div with class="aqpm70f":')
                             curr_chords.append(span.text)
 
-                         # Update song details with data
+                        # Update song details with data
                         reformatted_chords = reformat_chords(curr_chords)
                         key = reformatted_chords[-1]
                         chords = reformatted_chords[:-1]
-                        song_details['key'] = key
-                        song_details['chords'] = chords
 
                         # Get scale data
                         scale, roman_numeral_progression = get_roman_numeral_notation(chords, key)
-                        song_details['roman'] = roman_numeral_progression
-                        song_details['scale'] = scale
                         artist_dictionary[artist][album][song] = song_details
 
-                        # Update pandas data
-                        curr_entry = [artist, song, key, roman_numeral_progression]
-                        pd_data.append(curr_entry)
+                        song_details['key'] = key
+                        song_details['chords'] = chords
+                        song_details['roman_numeral_progression'] = roman_numeral_progression
+                        song_details['scale'] = scale
+
+                        progressions.append(roman_numeral_progression)
 
                         # Update key dictionary to determine most common keys
                         if key not in key_dictionary:
                             key_dictionary[key] = 1
                         else:
                             key_dictionary[key] += 1
-                        key_dictionary = sorted(key_dictionary.items(), key=lambda x: x[1], reverse=True)
 
                         # Update first chord dictionary to determine most common starter chord
                         first_chord = roman_numeral_progression[0]
@@ -282,16 +267,233 @@ def get_song_chords(artist_dictionary):
                             first_chord_dictionary[first_chord] = 1
                         else:
                             first_chord_dictionary[first_chord] += 1
-                        first_chord_dictionary = sorted(first_chord_dictionary.items(), key=lambda x: x[1], reverse=True)
 
-                    else:
-                        print('Div with class="aqpm70f" not found.')
-        df = pd.DataFrame(columns=['artist', 'song', 'key', 'progression'], data=pd_data)
-        return artist_dictionary, df, key_dictionary, first_chord_dictionary
-
+                        artist_dictionary[artist][album][song] = song_details
+        return artist_dictionary, key_dictionary, first_chord_dictionary, progressions
     finally:
         # Close the browser
         driver.quit()
+
+
+def test_scrape():
+    with open('test3.json', 'r') as f:
+        artist_dictionary = json.load(f)
+    key_dictionary = {}
+    first_chord_dictionary = {}
+    progressions = []
+    for artist, discography in artist_dictionary.items():
+        for album, tracks in discography.items():
+            for song, details in tracks.items():
+                chords = artist_dictionary[artist][album][song]['chords']
+                key = artist_dictionary[artist][album][song]['key']
+                scale, roman_numeral_progression = get_roman_numeral_notation(chords, key)
+                artist_dictionary[artist][album][song]['roman'] = roman_numeral_progression
+                artist_dictionary[artist][album][song]['scale'] = scale
+
+                progressions.append(roman_numeral_progression)
+
+                # Update key dictionary to determine most common keys
+                if key not in key_dictionary:
+                    key_dictionary[key] = 1
+                else:
+                    key_dictionary[key] += 1
+
+                # Update first chord dictionary to determine most common starter chord
+                first_chord = roman_numeral_progression[0]
+                if first_chord not in first_chord_dictionary:
+                    first_chord_dictionary[first_chord] = 1
+                else:
+                    first_chord_dictionary[first_chord] += 1
+
+    # Sort dictionaries and create DF
+    key_dictionary = sorted(key_dictionary.items(), key=lambda x: x[1], reverse=True)
+    first_chord_dictionary = sorted(first_chord_dictionary.items(), key=lambda x: x[1], reverse=True)
+
+    return artist_dictionary, key_dictionary, first_chord_dictionary, progressions
+
+
+# Define function to populate database with scraped data
+def populate_database(spotify_id, artist_name, db_path):
+
+    artist_dictionary = {}
+
+    discography = get_artist_tracks(spotify_id)
+    artist_dictionary[artist_name] = discography
+
+    discography = get_artist_tracks(spotify_id)
+    artist_dictionary[artist_name] = discography
+
+    display_discography(discography)
+    artist_dictionary = construct_song_search_urls(artist_dictionary)
+
+    artist_dictionary = scrape_song_chord_urls(artist_dictionary)
+
+    artist_dictionary, key_dictionary, first_chord_dictionary, progressions = scrape_song_chords(artist_dictionary)
+
+    # Connect to the database (or create it if it doesn't exist)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Populate database with scraped data
+    for artist, discography in artist_dictionary.items():
+        cursor.execute('''
+            INSERT INTO artist (artist, spotify_id)
+            VALUES (?, ?)
+            ''', (artist_name, spotify_id))
+        artist_id = cursor.lastrowid
+
+        for album, tracks in discography.items():
+            cursor.execute('''
+                INSERT INTO album (artist_id, album)
+                VALUES (?,?)
+                ''', (artist_id, album))
+            album_id = cursor.lastrowid
+
+            for song, details in tracks.items():
+                key = details['key']
+                progression = details['roman_numeral_progression']
+                cursor.execute('''
+                                INSERT INTO song (artist_id, album_id, song, key, progression)
+                                VALUES (?,?,?,?,?)
+                                ''', (artist_id, album_id, song, key, str(progression)))
+
+    # Commit the changes and close the connection
+    conn.commit()
+    conn.close()
+
+    rules = rule_mining(progressions)
+    return rules, key_dictionary, first_chord_dictionary
+
+
+# Define function to populate database with scraped data
+def test_populate_database(spotify_id, artist_name, db_path):
+
+    artist_dictionary, key_dictionary, first_chord_dictionary, progressions = test_scrape()
+
+    # Connect to the database (or create it if it doesn't exist)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Populate database with scraped data
+    for artist, discography in artist_dictionary.items():
+        cursor.execute('''
+            INSERT INTO artist (artist, spotify_id)
+            VALUES (?, ?)
+            ''', (artist_name, spotify_id))
+        artist_id = cursor.lastrowid
+
+        for album, tracks in discography.items():
+            cursor.execute('''
+                INSERT INTO album (artist_id, album)
+                VALUES (?,?)
+                ''', (artist_id, album))
+            album_id = cursor.lastrowid
+
+            for song, details in tracks.items():
+                key = details['key']
+                progression = details['roman_numeral_progression']
+                cursor.execute('''
+                                INSERT INTO song (artist_id, album_id, song, key, progression)
+                                VALUES (?,?,?,?,?)
+                                ''', (artist_id, album_id, song, key, str(progression)))
+
+    # Commit the changes and close the connection
+    conn.commit()
+    conn.close()
+
+    rules_sorted = rule_mining(progressions)
+
+    return rules_sorted, key_dictionary, first_chord_dictionary
+
+
+# Define function to setup database
+def database_setup(db_path):
+    # Connect to the database (or create it if it doesn't exist)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Create the artist table
+    cursor.execute('''
+                   CREATE TABLE IF NOT EXISTS artist (
+                       id INTEGER PRIMARY KEY,
+                       artist TEXT NOT NULL,
+                       spotify_id TEXT NOT NULL
+                   )
+                   ''')
+
+    # Create the album table
+    cursor.execute('''
+                   CREATE TABLE IF NOT EXISTS album (
+                       id INTEGER PRIMARY KEY,
+                       artist_id INTEGER,
+                       album TEXT NOT NULL,
+                       FOREIGN KEY (artist_id) REFERENCES artist (id)
+                   )
+                   ''')
+
+    # Create the song table
+    cursor.execute('''
+                   CREATE TABLE IF NOT EXISTS song (
+                       id INTEGER PRIMARY KEY,
+                       artist_id INTEGER,
+                       album_id INTEGER,
+                       song TEXT NOT NULL,
+                       key TEXT,
+                       progression TEXT,
+                       FOREIGN KEY (artist_id) REFERENCES artist (id),
+                       FOREIGN KEY (album_id) REFERENCES album (id)
+                   )
+                   ''')
+    conn.commit()
+    conn.close()
+
+
+def pull_from_database(spotify_id, db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+    SELECT* FROM artist WHERE spotify_id = ? LIMIT 1
+    ''', (spotify_id,)
+    )
+
+    result = cursor.fetchone()
+    artist_id = result[0]
+    artist_name = result[1]
+
+    cursor.execute('''
+    SELECT* FROM song WHERE artist_id = ?
+    ''', (artist_id,))
+
+    result = cursor.fetchall()
+
+    progressions = []
+    key_dictionary = {}
+    first_chord_dictionary = {}
+    for song in result:
+        curr_progression = ast.literal_eval(song[5])
+        key = song[4]
+        first_chord = curr_progression[0]
+
+        progressions.append(curr_progression)
+
+        # Update key dictionary to determine most common keys
+        if key not in key_dictionary:
+            key_dictionary[key] = 1
+        else:
+            key_dictionary[key] += 1
+
+        # Update first chord dictionary to determine most common starter chord
+        if first_chord not in first_chord_dictionary:
+            first_chord_dictionary[first_chord] = 1
+        else:
+            first_chord_dictionary[first_chord] += 1
+
+        # Sort dictionaries and create DF
+    key_dictionary = sorted(key_dictionary.items(), key=lambda x: x[1], reverse=True)
+    first_chord_dictionary = sorted(first_chord_dictionary.items(), key=lambda x: x[1], reverse=True)
+
+    return progressions, key_dictionary, first_chord_dictionary
 
 
 # Define a function to reformat unicode characters
@@ -311,9 +513,7 @@ def reformat_chords(chords):
 
 
 # Define function to find patterns in chord progressions using rule mining
-def rule_mining(df):
-    # Gather progressions from df
-    progressions = df['progression'].tolist()
+def rule_mining(progressions):
 
     # Transform progression to df
     te = TransactionEncoder()
@@ -335,21 +535,35 @@ def rule_mining(df):
     return rules_sorted
 
 
-
 # Example: Get all tracks by an artist (replace 'ARTIST_ID' with the artist's ID)
-artist_id = '4vGrte8FDu062Ntj0RsPiZ'
 artist_name = 'polyphia'
-artist_dictionary = {}
-discography = get_artist_tracks(artist_id)
-artist_dictionary[artist_name] = discography
+spotify_id = '4vGrte8FDu062Ntj0RsPiZ'
+db_path = 'db/testo.db'
+database_setup(db_path)
 
-display_discography(discography)
-artist_dictionary = get_song_search_urls(artist_dictionary)
+conn = sqlite3.connect(db_path)
+cursor = conn.cursor()
 
-artist_dictionary = get_song_chord_urls(artist_dictionary)
+query = f"SELECT 1 FROM artist WHERE spotify_id = ? LIMIT 1"
 
-artist_dictionary, df, key_dictionary, first_chord_dictionary = get_song_chords(artist_dictionary)
+cursor.execute(query, (spotify_id,))
 
-df.to_csv('test.csv', index=False)
-with open('test2.json', 'w') as f:
-    json.dump(artist_dictionary, f, indent=4)
+result = cursor.fetchone()
+conn.close()
+
+if result is None:
+    print('artist does not exist in database, beginning database population...')
+    # rules = populate_database(artist_name, spotify_id, db_path)
+    rules, key_dictionary, first_chord_dictionary = test_populate_database(spotify_id, artist_name, db_path)
+    print(key_dictionary)
+    print(first_chord_dictionary)
+    print(rules)
+
+
+else:
+    print('artist exists in database...')
+    progressions, key_dictionary, first_chord_dictionary = pull_from_database(spotify_id, db_path)
+    print(progressions)
+    rules = rule_mining(progressions)
+    print(first_chord_dictionary)
+
