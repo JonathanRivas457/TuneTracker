@@ -1,2 +1,4 @@
 # TuneTracker
-A tool to analyze chord progressions of bands/artists. Utilizing rule mining and statistical techniques, it uncovers patterns and insights in musical compositions.
+TuneTracker is a tool designed to analyze chord progressions of bands and artists. By utilizing rule mining and statistical techniques, it uncovers patterns and insights within musical compositions. The process begins with retrieving an artist's discography from the Spotify API using their Spotify ID, which includes the artist's albums and songs. The song names are then used to scrape chord progressions from chordify.net.
+
+To enhance generalization and results, the chord progressions are converted to Roman numeral notation. For example, a progression of Cm -> Dm -> Gm in the key of C major will be represented as i -> iii -> v in Roman numeral notation. These progressions are treated as buckets, and a rule mining algorithm is employed to discover patterns in the artist's music.
